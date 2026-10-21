@@ -81,8 +81,12 @@ class ScratchFFNN:
             activations.append(a)
         return (a, activations, zs) if cache else a
 
-    def gradients(self, X, y):
-        """Backpropagation. Returns (dC/dW for every layer, dC/db for every layer)."""
+    def gradients(self, X, y, penalty=None, lam=0.0):
+        """Backpropagation with optional L1 or L2 weight regularization."""
+        if penalty not in (None, 'l1', 'l2'):
+            raise ValueError("penalty must be None, 'l1', or 'l2'")
+        if lam < 0:
+            raise ValueError("lam must be non-negative")
         pred, acts, zs = self.forward(X, cache=True)
         # MSE = mean((prediction - target)^2), n samples, one output.
         delta = 2*(pred-y)/pred.size  # linear output derivative is 1
@@ -91,12 +95,17 @@ class ScratchFFNN:
         for j in range(len(self.weights)-1, -1, -1):
             dWs[j] = acts[j].T @ delta
             dbs[j] = np.sum(delta, axis=0, keepdims=True)
+            if penalty == 'l1':
+                dWs[j] += lam*np.sign(self.weights[j])
+            elif penalty == 'l2':
+                dWs[j] += 2*lam*self.weights[j]
             if j > 0:
                 delta = (delta @ self.weights[j].T)*activation_grad(zs[j-1], self.activation)
         return dWs, dbs
 
     def fit(self, X, y, X_val=None, y_val=None, optimizer='adam', lr=0.01,
-            epochs=500, batch_size=32, patience=None, restore_best=True):
+            epochs=500, batch_size=32, patience=None, restore_best=True,
+            penalty=None, lam=0.0):
         """Train with 'gd' (full batch), 'rmsprop' or 'adam' (minibatches of batch_size).
 
         X_val, y_val : optional validation data. Without them the network simply trains
@@ -109,6 +118,10 @@ class ScratchFFNN:
         The per-epoch losses are kept in self.history (units of the y passed in).
         """
         if optimizer not in ('gd','rmsprop','adam'): raise ValueError(optimizer)
+        if penalty not in (None, 'l1', 'l2'):
+            raise ValueError("penalty must be None, 'l1', or 'l2'")
+        if lam < 0:
+            raise ValueError("lam must be non-negative")
         has_val = X_val is not None
         rg = np.random.default_rng(self.seed+1000)
         params = self.weights + self.biases
@@ -128,7 +141,7 @@ class ScratchFFNN:
                 shuffled = rg.permutation(len(X)) if optimizer != 'gd' else np.arange(len(X))
                 for start in range(0, len(X), bs):
                     ids = shuffled[start:start+bs]
-                    gW, gb = self.gradients(X[ids], y[ids])
+                    gW, gb = self.gradients(X[ids], y[ids], penalty=penalty, lam=lam)
                     gradients = gW+gb
                     t += 1
                     for j, (param, g) in enumerate(zip(params, gradients)):
