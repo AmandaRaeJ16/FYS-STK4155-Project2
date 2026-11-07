@@ -1,0 +1,5 @@
+model,parameters,test_accuracy,std_error
+"Logistic regression, Scikit-Learn (saga, 60 000 images)",7850,0.9257,0.0026225847936720754
+"Logistic regression, our code (no hidden layers, 54 000 images)",7850,0.9268,0.0026046450813882504
+"Our network (128, 64) relu",109386,0.9756,0.0015428752379891245
+"Scikit-Learn MLPClassifier (128, 64) relu",109386,0.9779,0.0014700880925985356

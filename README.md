@@ -10,8 +10,7 @@ We implement feed-forward neural networks from scratch in NumPy and use them for
 (i) regression on Runge's function, compared with OLS, Ridge and Lasso on polynomial
 features from Project 1 (https://github.com/GiacomoSaporetti/FYS-STK4155-Project1/tree/main), 
 and (ii) multiclass classification of the MNIST handwritten digits, compared with logistic 
-regression. The project covers manual backpropagation verified against automatic differentiation, 
-gradient descent with RMSprop and Adam, L1/L2 regularisation, and hyperparameter selection by cross-validation.
+regression (Scikit-Learn and our own network without hidden layers) and with Scikit-Learn's `MLPClassifier`. The project covers manual backpropagation verified against automatic differentiation, gradient descent with RMSprop and Adam, L1/L2 regularisation, and hyperparameter selection by cross-validation.
 
 ## Repository contents
 
@@ -21,7 +20,7 @@ gradient descent with RMSprop and Adam, L1/L2 regularisation, and hyperparameter
 | `doc`                         | LaTeX source of the report and corresponding PDF file                                                                                      |
 | `Code/Project2.ipynb`         | Main Jupyter notebook: runs all experiments (regression on the Runge function, MNIST classification) and produces the figures and tables  |
 | `Code/scratch_ffnn.py`        | Feed-forward neural network for regression, written from scratch in NumPy: sigmoid/ReLU/leaky ReLU, manual backpropagation, GD/RMSprop/Adam, L1/L2 penalties, gradient checks against `jax.grad` and finite differences |
-| `Code/scratch_classifier.py`  | Feed-forward neural network for multiclass classification, written from scratch in NumPy: softmax output, cross-entropy cost, GD/RMSprop/Adam, L2 penalty |
+| `Code/scratch_classifier.py`  | Feed-forward neural network for multiclass classification, written from scratch in NumPy: softmax output, cross-entropy cost, GD/RMSprop/Adam, L1/L2 penalties; `hidden_layers=()` gives logistic regression; gradient checks against `jax.grad` and finite differences |
 | `Code/results`                | Cached results (CSV and joblib files) created by the notebook so that long hyperparameter scans are not recomputed. Delete the files to rerun the scans |
 | `Code/figures`                | Resulting graphs                                                                                                                           |
 
@@ -53,7 +52,7 @@ Create a virtual environment (recommended) and install the dependencies:
 ```bash
 python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install numpy pandas scikit-learn matplotlib seaborn joblib jax jupyter
+pip install -r requirements.txt
 ```
 
 
@@ -99,3 +98,6 @@ in `Code/figures` are present first.
 - The full hyperparameter grid for the regularised networks (part d) takes a long time on the
   first run. The results are cached, so later runs are fast.
 - The gradient check against `jax.grad` is the only part that needs `jax`.
+- With the cached results the whole notebook runs in about 10-20 minutes on one CPU core.
+- The end-of-run errors of the 3000-epoch run in part c (Fig. 7) can differ slightly between
+  machines (rounding amplified by Adam spikes); the best-epoch values used in the report do not.

@@ -1,12 +1,28 @@
+"""
+scratch_classifier.py -- our own feed-forward classifier in numpy
+
+Same conventions as scratch_ffnn.py (samples in rows, weights of shape (inputs, outputs),
+feed-forward step a @ W + b), but with a softmax output layer and the multiclass
+cross-entropy cost.
+
+Contents
+  ScratchClassifier   hidden layers with sigmoid, ReLU or leaky ReLU, softmax output,
+                      cross-entropy cost, optional L1 or L2 penalty on the weights,
+                      training with plain GD, RMSprop or Adam on minibatches.
+                      hidden_layers=() gives a network with no hidden layers, which is
+                      multinomial logistic regression (our own baseline).
+  check_gradients     compares backpropagation with jax.grad and with central finite
+                      differences for every parameter of small networks.
+"""
 import numpy as np
 
 class ScratchClassifier:
     """
     Feed-forward neural network for multiclass classification.
 
-    Hidden layers use ReLU or Leaky ReLU.
-    The output layer uses softmax.
-    The cost function is multiclass cross-entropy.
+    Hidden layers use sigmoid, ReLU or leaky ReLU (the same activation in every hidden
+    layer). The output layer uses softmax and the cost function is the multiclass
+    cross-entropy. With hidden_layers=() the network is multinomial logistic regression.
     """
 
     def __init__(
@@ -146,7 +162,12 @@ class ScratchClassifier:
         predictions = np.argmax(probabilities, axis=1)
         return np.mean(predictions == y)
 
-    def gradients(self, X, y, l2=0.0):
+    def gradients(self, X, y, l2=0.0, penalty=None, lam=0.0):
+        if penalty not in (None, "l1", "l2"):
+            raise ValueError("penalty must be None, 'l1' or 'l2'")
+        if l2 > 0.0:
+            penalty, lam = "l2", l2
+
         probabilities, activations, pre_activations = self.forward(
             X,
             cache=True,
@@ -165,9 +186,13 @@ class ScratchClassifier:
                 activations[layer_index].T @ delta
             )
 
-            if l2 > 0.0:
+            if penalty == "l2" and lam > 0.0:
                 d_weights[layer_index] += (
-                    2.0 * l2 * self.weights[layer_index]
+                    2.0 * lam * self.weights[layer_index]
+                )
+            elif penalty == "l1" and lam > 0.0:
+                d_weights[layer_index] += (
+                    lam * np.sign(self.weights[layer_index])
                 )
 
             d_biases[layer_index] = np.sum(
@@ -202,7 +227,17 @@ class ScratchClassifier:
         batch_size=128,
         l2=0.0,
         verbose=True,
+        penalty=None,
+        lam=0.0,
+
     ):
+        
+        """Train on minibatches of batch_size with 'gd', 'rmsprop' or 'adam'.
+
+        l2 is the strength of an L2 penalty (as used in the report); alternatively pass
+        penalty='l1' or 'l2' together with lam. The per-epoch training and validation
+        loss and accuracy are stored in self.history.
+        """
         if optimizer not in ("gd", "rmsprop", "adam"):
             raise ValueError(
                 "optimizer must be 'gd', 'rmsprop', or 'adam'"
@@ -237,6 +272,8 @@ class ScratchClassifier:
                     X_batch,
                     y_batch,
                     l2=l2,
+                    penalty=penalty,
+                    lam=lam,
                 )
 
                 gradients = d_weights + d_biases
@@ -344,3 +381,73 @@ class ScratchClassifier:
                 )
 
         return self
+    
+# Gradient check
+
+def check_gradients(X, y, hidden_layers_list=((), (8, 6)),
+                    activations=("sigmoid", "relu", "leaky_relu"),
+                    n_classes=10, seed=9, eps=1e-6):
+    
+    """Compare the backpropagation of ScratchClassifier with jax.grad and with central
+    finite differences of the cross-entropy, for every weight and bias.
+
+    X, y : a small batch of inputs and integer labels (keep it small: the finite
+           differences need two forward passes per parameter).
+    Returns {(hidden_layers, activation): (jax_ok, finite_differences_ok)}.
+
+    LLM-assisted (level 2): Claude (claude.ai, November 2026) supplied this
+    function, modelled on check_gradients in scratch_ffnn.py. We integrated it
+    with our ScratchClassifier and call it in part e of the notebook. Verified
+    by running it on 20 MNIST images for a network without hidden layers and
+    for (8, 6) networks with sigmoid, ReLU and leaky ReLU: every weight and bias
+    agrees with jax.grad and with central finite differences.
+    """
+
+    import jax
+    import jax.numpy as jnp
+    jax.config.update("jax_enable_x64", True)
+
+    jax_act = {"sigmoid": lambda z: 1 / (1 + jnp.exp(-jnp.clip(z, -50, 50))),
+               "relu": lambda z: jnp.maximum(z, 0),
+               "leaky_relu": lambda z: jnp.where(z > 0, z, 0.01 * z)}
+    Y = ScratchClassifier._one_hot(y, n_classes)
+    results = {}
+    for hidden in hidden_layers_list:
+        # with no hidden layers the activation plays no role: check it once
+        acts = activations if len(hidden) > 0 else activations[:1]
+        for act in acts:
+            net = ScratchClassifier(hidden, act, n_inputs=X.shape[1],
+                                    n_classes=n_classes, seed=seed)
+
+            def cost(weights, biases):
+                a = X
+                for j, (W, b) in enumerate(zip(weights, biases)):
+                    z = a @ W + b
+                    a = z if j == len(weights) - 1 else jax_act[act](z)
+                return -jnp.mean(jnp.sum(Y * jax.nn.log_softmax(a, axis=1), axis=1))
+
+            gW, gb = net.gradients(X, y)
+            jW, jb = jax.grad(cost, argnums=(0, 1))(net.weights, net.biases)
+            jax_ok = all(np.allclose(a, b, rtol=1e-6, atol=1e-10)
+                         for a, b in zip(gW + gb, list(jW) + list(jb)))
+
+            fd_ok = True
+            for params, grads in ((net.weights, gW), (net.biases, gb)):
+                for P, G in zip(params, grads):
+                    for idx in np.ndindex(P.shape):
+                        old = P[idx]
+                        P[idx] = old + eps
+                        lp = net.cross_entropy(net.forward(X), y)
+                        P[idx] = old - eps
+                        lm = net.cross_entropy(net.forward(X), y)
+                        P[idx] = old
+                        if not np.isclose(G[idx], (lp - lm) / (2 * eps),
+                                          rtol=1e-4, atol=1e-8):
+                            fd_ok = False
+            n_par = sum(W.size + b.size for W, b in zip(net.weights, net.biases))
+            label = act if len(hidden) > 0 else "none (logistic regression)"
+            print(f"hidden layers {str(hidden):7s} activation {label:27s} "
+                  f"{n_par:5d} parameters:  backprop == jax.grad: {jax_ok},  "
+                  f"backprop == finite differences: {fd_ok}")
+            results[(hidden, act)] = (jax_ok, fd_ok)
+    return results
