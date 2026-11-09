@@ -84,7 +84,7 @@ To compile the report from the LaTeX source:
 
 ```bash
 cd doc
-pdflatex Report.tex
+pdflatex main.tex
 ```
 
 Run it twice if the references or table of contents are not updated. Make sure the figures
